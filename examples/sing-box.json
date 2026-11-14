@@ -1,0 +1,104 @@
+{
+  "log": { "level": "warn", "timestamp": true },
+
+  "dns": {
+    "servers": [
+      { "tag": "local", "type": "udp", "server": "223.5.5.5" },
+      { "tag": "remote", "type": "https", "server": "1.1.1.1", "detour": "proxy" }
+    ],
+    "rules": [
+      { "domain": ["dl.google.com", "dl-ssl.google.com"], "server": "local" },
+      { "rule_set": ["geosite-cn"], "server": "local" }
+    ],
+    "final": "remote"
+  },
+
+  "inbounds": [
+    { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890 },
+    { "type": "redirect", "tag": "redirect-in", "listen": "0.0.0.0", "listen_port": 7892 },
+    { "type": "direct", "tag": "dns-in", "listen": "0.0.0.0", "listen_port": 5335 }
+  ],
+
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "proxy",
+      "server": "127.0.0.1",
+      "server_port": 1080
+    },
+    { "type": "direct", "tag": "direct" }
+  ],
+
+  "route": {
+    "default_domain_resolver": "local",
+    "rule_set": [
+      {
+        "tag": "geosite-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/QuixoticHeart/rule-set/ruleset/singbox/version5/cn.srs",
+        "download_detour": "proxy"
+      },
+      {
+        "tag": "geoip-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/QuixoticHeart/rule-set/ruleset/singbox/version5/cncidr.srs",
+        "download_detour": "proxy"
+      }
+    ],
+    "rules": [
+      { "action": "sniff" },
+      { "protocol": "dns", "action": "hijack-dns" },
+      { "ip_is_private": true, "outbound": "direct" },
+
+      {
+        "domain_suffix": [
+          "googlevideo.com",
+          "xn--ngstr-lra8j.com",
+          "gvt1.com",
+          "gvt2.com",
+          "gvt3.com"
+        ],
+        "action": "resolve",
+        "server": "remote"
+      },
+
+      {
+        "domain_suffix": [
+          "dl.google.com",
+          "dl-ssl.google.com",
+          "xn--ngstr-lra8j.com",
+          "gvt1.com",
+          "gvt2.com",
+          "gvt3.com",
+          "googlevideo.com"
+        ],
+        "outbound": "direct"
+      },
+
+      {
+        "domain_suffix": [
+          "play.googleapis.com",
+          "play-fe.googleapis.com",
+          "android.clients.google.com",
+          "googleapis.com",
+          "gstatic.com",
+          "googleusercontent.com",
+          "ggpht.com",
+          "google.com",
+          "android.com"
+        ],
+        "outbound": "proxy"
+      },
+
+      { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }
+    ],
+    "final": "proxy",
+    "auto_detect_interface": true
+  },
+
+  "experimental": {
+    "clash_api": { "external_controller": "127.0.0.1:9090" }
+  }
+}

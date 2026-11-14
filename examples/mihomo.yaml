@@ -1,0 +1,76 @@
+# mihomo / Clash.Meta 示例
+# 把 PROXY 换成你的策略组名；节点部分自行填写
+
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "dl.google.com"
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver-policy:
+    "dl.google.com": "223.5.5.5"
+    "+.dl.google.com": "223.5.5.5"
+    "+.dl-ssl.google.com": "223.5.5.5"
+    # 防投毒：经代理的加密 DNS
+    "+.googlevideo.com": ["https://1.1.1.1/dns-query"]
+    "+.gvt1.com": ["https://1.1.1.1/dns-query"]
+    "+.gvt2.com": ["https://1.1.1.1/dns-query"]
+    "+.gvt3.com": ["https://1.1.1.1/dns-query"]
+    "+.xn--ngstr-lra8j.com": ["https://1.1.1.1/dns-query"]
+
+sniffer:
+  enable: true
+  override-destination: true
+  sniff:
+    TLS:
+      ports: [443]
+    HTTP:
+      ports: [80]
+
+proxies:
+  - name: "node-1"
+    type: hysteria2
+    server: example.com
+    port: 443
+    password: "REPLACE_ME"
+    sni: example.com
+    skip-cert-verify: true
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: ["node-1"]
+
+rules:
+  # ---- Play 下载 CDN：必须在 google.com 之前 ----
+  - DOMAIN-SUFFIX,dl.google.com,DIRECT
+  - DOMAIN-SUFFIX,dl-ssl.google.com,DIRECT
+  - DOMAIN-SUFFIX,xn--ngstr-lra8j.com,DIRECT
+  - DOMAIN-SUFFIX,gvt1.com,DIRECT
+  - DOMAIN-SUFFIX,gvt2.com,DIRECT
+  - DOMAIN-SUFFIX,gvt3.com,DIRECT
+  - DOMAIN-SUFFIX,googlevideo.com,DIRECT
+
+  # ---- 商店 API / 资源：走代理 ----
+  - DOMAIN-SUFFIX,play.googleapis.com,PROXY
+  - DOMAIN-SUFFIX,play-fe.googleapis.com,PROXY
+  - DOMAIN-SUFFIX,android.clients.google.com,PROXY
+  - DOMAIN-SUFFIX,googleapis.com,PROXY
+  - DOMAIN-SUFFIX,ggpht.com,PROXY
+  - DOMAIN-SUFFIX,googleusercontent.com,PROXY
+
+  - GEOSITE,cn,DIRECT
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,PROXY

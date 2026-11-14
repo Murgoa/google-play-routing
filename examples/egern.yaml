@@ -1,0 +1,98 @@
+# Egern 示例（rules + dns）
+# policy 里的「节点」改成你的代理策略名；DIRECT / REJECT 保留原样
+
+dns:
+  bootstrap:
+    - system
+  upstreams:
+    ali:
+      - 223.5.5.5
+      - 119.29.29.29
+    cf:
+      - https://1.1.1.1/dns-query
+  forward:
+    # 下载域名：国内视角，才能拿到国内 GGC
+    - wildcard:
+        match: 'dl.google.com'
+        value: ali
+    - wildcard:
+        match: '*.dl.google.com'
+        value: ali
+    - wildcard:
+        match: '*.dl-ssl.google.com'
+        value: ali
+    # 防投毒：加密 DNS
+    - wildcard:
+        match: '*.googlevideo.com'
+        value: cf
+    - wildcard:
+        match: '*.gvt1.com'
+        value: cf
+    - wildcard:
+        match: '*.gvt2.com'
+        value: cf
+    - wildcard:
+        match: '*.gvt3.com'
+        value: cf
+    - wildcard:
+        match: '*.xn--ngstr-lra8j.com'
+        value: cf
+    # 国内域名走本地
+    - proxy_rule_set:
+        match: https://github.com/ACL4SSR/ACL4SSR/raw/master/Clash/ChinaDomain.list
+        value: ali
+    - wildcard:
+        match: '*'
+        value: cf
+  public_ip_lookup_url: https://ifconfig.me/ip
+
+rules:
+  # ---- Play 下载 CDN：必须在 google 类规则之前 ----
+  - domain_suffix:
+      match: dl.google.com
+    policy: DIRECT
+  - domain_suffix:
+      match: dl-ssl.google.com
+    policy: DIRECT
+  - domain_suffix:
+      match: xn--ngstr-lra8j.com
+    policy: DIRECT
+  - domain_suffix:
+      match: gvt1.com
+    policy: DIRECT
+  - domain_suffix:
+      match: gvt2.com
+    policy: DIRECT
+  - domain_suffix:
+      match: gvt3.com
+    policy: DIRECT
+  - domain_suffix:
+      match: googlevideo.com
+    policy: DIRECT
+
+  # ---- 商店 API / 资源：走代理 ----
+  - domain_suffix:
+      match: play.googleapis.com
+    policy: 节点
+  - domain_suffix:
+      match: play-fe.googleapis.com
+    policy: 节点
+  - domain_suffix:
+      match: android.clients.google.com
+    policy: 节点
+  - domain_suffix:
+      match: googleapis.com
+    policy: 节点
+  - domain_suffix:
+      match: ggpht.com
+    policy: 节点
+  - domain_suffix:
+      match: googleusercontent.com
+    policy: 节点
+
+  - geoip:
+      match: CN
+    policy: DIRECT
+
+  - default:
+      policy: 节点
