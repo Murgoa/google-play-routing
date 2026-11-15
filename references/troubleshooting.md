@@ -8,8 +8,9 @@ Play 更新失败通常有四种形态，指向完全不同的原因：
 |---|---|---|
 | A. 列表能刷、点更新转圈 | 商店 API 通，下载不通 | **下载域名走了代理**或 DNS 假 IP |
 | B. Play 首页也打不开 | API 都不通 | 规则/节点问题 |
-| C. 下载到某个百分比停住 | 部分 CDN 域名没覆盖 | 漏了 `xn--ngstr` 或 `googlevideo` |
+| C. 下载到某个百分比停住 | 部分 CDN 域名没覆盖 | 漏了 `xn--ngstr` |
 | D. 只有 4G/蜂窝网络异常 | 分流只在 Wi-Fi 环境生效 | 客户端未在蜂窝下启用代理 |
+| E. **YouTube 页面能开、视频黑屏转圈** | 站点通、视频流不通 | **`googlevideo.com` 被错判成 DIRECT** |
 
 ## 二、实测数据（2026-11，中国大陆移动宽带）
 
@@ -39,6 +40,16 @@ Play 更新失败通常有四种形态，指向完全不同的原因：
 
 同一时刻从三个地区（美/澳/新）的节点访问 Play 下载 CDN 全部超时——说明问题与节点质量无关，是"海外回连国内 CDN"这一结构性错误。
 
+### `googlevideo.com` 与 `dl.google.com` 方向相反
+
+| 域名 | 国内 DNS（223.5.5.5） | 直连 | 走代理 |
+|---|---|---|---|
+| `dl.google.com` | `114.250.63.33`（联通 GGC） | **200 / 4.09 MB/s** | 200 / 1.14 MB/s |
+| `redirector.googlevideo.com` | `199.96.59.19`（境外） | **000 / 0.01s** | **204 / 0.76s** |
+| `rr4---sn-xxx.xn--ngstr-lra8j.com` | 国内 GGC | 204 / 0.18s | — |
+
+**判定法则：国内 DNS 解析出来的 IP 在不在国内。** 在国内 → 直连；在境外 → 必须代理。别靠"是不是 Google CDN"来判断。
+
 ## 三、检查顺序（每步都有明确判据）
 
 ```bash
@@ -46,7 +57,7 @@ Play 更新失败通常有四种形态，指向完全不同的原因：
 curl -s http://127.0.0.1:9090/connections | python3 -m json.tool | \
   grep -E '"host"|"chains"|"download"' | head -30
 ```
-判据：下载类域名（`dl.google.com` / `gvt1` / `ngstr` / `googlevideo`）的 `chains` 应为 `["direct"]`。
+判据：Play 下载类域名（`dl.google.com` / `gvt1` / `ngstr`）的 `chains` 应为 `["direct"]`；**`googlevideo.com` 相反，`chains` 应出现节点名**，为 `["direct"]` 则说明视频流被错判了。
 
 ```bash
 # 2. 手工对比直连与代理
@@ -71,10 +82,17 @@ curl -s -x http://127.0.0.1:7890 -m 10 -o /dev/null \
 ```
 判据：返回 200/301 且 < 1s = 域名规则生效；000 超时 = 还在按 IP 决策。
 
-## 四、六个真实踩过的坑
+## 四、七个真实踩过的坑
 
 1. **`domain_suffix: google.com → PROXY` 吞掉了 `dl.google.com`。**
    加上"Google 全量走代理"后 Play 立刻 0 字节。正解：下载域名规则放最前。
+
+1b. **把 `googlevideo.com` 混进「下载 CDN → DIRECT」白名单（坑 1 的镜像）。**
+   Play 下载一切正常，**但 YouTube 视频全黑、一直转圈**。日志满是
+   `dial tcp ...: i/o timeout using outbound/direct`，`chains` 显示 `["direct"]`。
+   根因是把它和 `dl.google.com` 当成同类 CDN 写进了一条规则。
+   正解：`googlevideo.com` 单独一条 → PROXY（前面加 `resolve`）。
+   详见 [sing-box.md 第 4 节](sing-box.md#4-googlevideo-不能直连一个真实踩到的坑)。
 
 2. **对 `dl.google.com` 做远程 DNS 重解析（sing-box `resolve`）。**
    远程 DNS 按出口所在地返回境外 IP → 直连失效 → 速度从 4.3MB/s 掉到 0.97MB/s。

@@ -15,10 +15,19 @@
           "domain:xn--ngstr-lra8j.com",
           "domain:gvt1.com",
           "domain:gvt2.com",
-          "domain:gvt3.com",
-          "domain:googlevideo.com"
+          "domain:gvt3.com"
         ],
         "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "domain:googlevideo.com",
+          "domain:youtube.com",
+          "domain:youtu.be",
+          "domain:ytimg.com"
+        ],
+        "outboundTag": "proxy"
       },
       {
         "type": "field",
@@ -93,11 +102,15 @@
 
 ### 3. hosts 硬编码（应急）
 
-`googlevideo` 被投毒到失效 IP 时，最稳的应急手段是直接写死一个可用的国内 GGC：
+⚠️ **只适用于 Play 下载域名，不要对 `googlevideo.com` 这么做。**
+
+`dl.google.com` 被投毒到失效 IP 时，可以临时写死一个可用的国内 GGC：
 
 ```json
-{"dns": {"hosts": {"rr4---sn-j5o76n7z.googlevideo.com": "58.254.149.197"}}}
+{"dns": {"hosts": {"dl.google.com": "114.250.63.33"}}}
 ```
+
+反之，**`googlevideo.com` 绝不能写死国内 IP**——它国内本来就没有可用节点，写死就等于坐实直连失败。它需要的是走代理解析。
 
 缺点：CDN 节点会变、主机名会变，只适合临时救火。
 

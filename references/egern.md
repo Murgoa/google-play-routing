@@ -17,11 +17,22 @@ rules:
       match: xn--ngstr-lra8j.com
     policy: DIRECT
   - domain_suffix:
-      match: gvt1.com
+      match: gvt3.com
     policy: DIRECT
+
+  # ---- YouTube 视频流：必须走代理 ----
   - domain_suffix:
       match: googlevideo.com
-    policy: DIRECT
+    policy: 节点
+  - domain_suffix:
+      match: youtube.com
+    policy: 节点
+  - domain_suffix:
+      match: youtu.be
+    policy: 节点
+  - domain_suffix:
+      match: ytimg.com
+    policy: 节点
 
   # ---- 商店 API：走代理 ----
   - domain_suffix:
@@ -56,7 +67,7 @@ rules:
             match: googlevideo.com
         - dest_port:
             match: "443"
-      policy: DIRECT
+      policy: 节点
 ```
 
 ## DNS 段

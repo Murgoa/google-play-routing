@@ -31,9 +31,12 @@ Play 的「下载」走直连，「商店 API」走代理。
 
 | 组 | 域名 | 走向 |
 |---|---|---|
-| 下载 CDN | `dl.google.com`、`dl-ssl.google.com`、`*.xn--ngstr-lra8j.com`、`*.gvt1/2/3.com`、`*.googlevideo.com` | **DIRECT** |
+| 下载 CDN | `dl.google.com`、`dl-ssl.google.com`、`*.xn--ngstr-lra8j.com`、`*.gvt1/2/3.com` | **DIRECT** |
+| 视频流 | `*.googlevideo.com` | **PROXY** |
 | 商店 API | `play.googleapis.com`、`play-fe.googleapis.com`、`android.clients.google.com`、`*.googleapis.com` | **PROXY** |
 | 资源 | `*.gstatic.com`、`*.ggpht.com`、`*.googleusercontent.com` | PROXY |
+
+> ⚠️ `googlevideo.com` **不是**下载 CDN。它国内无节点，直连必超时；混进下载白名单会让 YouTube 视频全黑。详见 [references/sing-box.md](references/sing-box.md#4-googlevideo-不能直连一个真实踩到的坑)。
 
 `xn--ngstr-lra8j.com` 是 punycode，解码为 `ångströ.com`（Google 的 Angstrom CDN），**必须原样写 punycode**。
 
@@ -62,6 +65,7 @@ Play 的「下载」走直连，「商店 API」走代理。
 - 直连 `dl.google.com` **4.17–4.37 MB/s**，经海外代理 **1.05 MB/s**（差 4 倍）
 - Play 下载 CDN 送海外代理：**000 / 20s，down=0 字节**
 - `googlevideo.com` 本地 DNS 被投毒到 `108.160.165.9` / `31.13.112.9` / `199.59.148.96`，真实 GGC 为 `58.254.149.197`、`114.250.63.33`
+- `googlevideo.com` **直连 000 秒断**，走代理 **204 / 0.76s**（与 `dl.google.com` 方向相反）
 
 细节见 [references/troubleshooting.md](references/troubleshooting.md)。
 

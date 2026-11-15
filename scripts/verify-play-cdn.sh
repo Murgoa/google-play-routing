@@ -7,9 +7,10 @@
 #   CLASH_API=http://127.0.0.1:9090 ./verify-play-cdn.sh 127.0.0.1:7890
 #
 # 判据:
-#   1) 下载域名直接请求应返回 200/301/404，耗时 < 1s
-#   2) 经代理时，sing-box/mihomo 的 /connections 里 chains 应为 direct
+#   1) dl.google.com 直接请求应返回 200/301，耗时 < 1s
+#   2) 经代理时，sing-box/mihomo 的 /connections 里 dl.google.com 的 chains 应为 direct
 #   3) 测速：直连通常 2~20MB/s；若掉到 1MB/s 量级，多半被送去代理了
+#   4) googlevideo.com 反之：直连应失败(000)，经代理应可达——它必须走代理
 
 set -u
 PROXY="${1:-}"
@@ -21,24 +22,31 @@ CURL=(curl -s -m 12 -o /dev/null)
 p() { printf '%-46s %s\n' "$1" "$2"; }
 hr() { printf '%s\n' "------------------------------------------------------------"; }
 
-echo "== 1. DNS 是否被投毒（应返回国内 GGC，如 58.254.x / 114.250.x）"
-for h in "$CDN_HOST" dl.google.com; do
+echo "== 1. DNS 是否被投毒"
+for h in dl.google.com "$CDN_HOST"; do
   ip=$(dig +short +time=3 +tries=1 "$h" 2>/dev/null | tail -1)
   [ -z "$ip" ] && ip="(解析失败)"
   p "$h" "$ip"
 done
-echo "   假 IP 特征: 108.160.x / 31.13.x / 199.59.x -> 被投毒"
+echo "   dl.google.com 期望国内 GGC(114.250.x / 58.254.x)"
+echo "   googlevideo 期望境外(199.96.x 等)；出现 108.160.x/31.13.x/199.59.x = 被投毒"
 hr
 
-echo "== 2. 直连下载域名（不经代理）"
+echo "== 2. Play 下载域名直连（期望 200 且 MB/s 量级）"
 p "dl.google.com" "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "$DL_URL")"
-p "$CDN_HOST" "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "https://$CDN_HOST/")"
+hr
+
+echo "== 2b. YouTube 视频流：直连应失败，代理应成功"
+p "googlevideo 直连" "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "https://$CDN_HOST/")"
+if [ -n "$PROXY" ]; then
+  p "googlevideo 经代理" "$("${CURL[@]}" -x "http://$PROXY" -w '%{http_code} %{time_total}s' "https://$CDN_HOST/")"
+fi
+echo "   期望: 直连 000；代理 404/204。若直连成功而代理失败 = 分流反了"
 hr
 
 if [ -n "$PROXY" ]; then
   echo "== 3. 经代理 $PROXY 下载（应仍是 direct 链，速度不应低于直连太多）"
   p "dl.google.com" "$("${CURL[@]}" -x "http://$PROXY" -w '%{http_code} %{time_total}s' "$DL_URL")"
-  p "$CDN_HOST" "$("${CURL[@]}" -x "http://$PROXY" -w '%{http_code} %{time_total}s' "https://$CDN_HOST/")"
   hr
 
   echo "== 4. 速度对比（10MB）"
@@ -61,5 +69,6 @@ fi
 
 echo
 echo "完成。判定要点："
-echo "  - 直连能返回 200/301/404 且 < 1s = CDN 可达"
-echo "  - 经代理后变得明显更慢或 000 超时 = 下载域名被送进代理（规则顺序问题）"
+echo "  - dl.google.com 直连返回 200/301 且 < 1s = Play 下载 CDN 可达"
+echo "  - dl.google.com 经代理后明显变慢或 000 = 下载域名被送进代理（规则顺序问题）"
+echo "  - googlevideo 直连成功、代理失败 = 分流反了（视频流域名被错判成 DIRECT）"

@@ -11,7 +11,12 @@ rules:
   - DOMAIN-SUFFIX,gvt1.com,DIRECT
   - DOMAIN-SUFFIX,gvt2.com,DIRECT
   - DOMAIN-SUFFIX,gvt3.com,DIRECT
-  - DOMAIN-SUFFIX,googlevideo.com,DIRECT
+
+  # ---- YouTube 视频流：必须走代理（国内无 GGC 节点，直连必超时）----
+  - DOMAIN-SUFFIX,googlevideo.com,PROXY
+  - DOMAIN-SUFFIX,youtube.com,PROXY
+  - DOMAIN-SUFFIX,youtu.be,PROXY
+  - DOMAIN-SUFFIX,ytimg.com,PROXY
 
   # ---- 商店 API：走代理 ----
   - DOMAIN-SUFFIX,play.googleapis.com,PROXY

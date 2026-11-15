@@ -71,10 +71,27 @@
           "xn--ngstr-lra8j.com",
           "gvt1.com",
           "gvt2.com",
-          "gvt3.com",
-          "googlevideo.com"
+          "gvt3.com"
         ],
         "outbound": "direct"
+      },
+
+      {
+        "domain_suffix": ["googlevideo.com"],
+        "action": "resolve",
+        "server": "remote"
+      },
+
+      {
+        "domain_suffix": [
+          "googlevideo.com",
+          "youtube.com",
+          "youtu.be",
+          "ytimg.com",
+          "youtube-nocookie.com",
+          "youtubei.googleapis.com"
+        ],
+        "outbound": "proxy"
       },
 
       {

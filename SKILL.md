@@ -1,6 +1,6 @@
 ---
 name: google-play-routing
-description: 编写与排查 Google Play 商店/下载分流规则（sing-box、mihomo、Xray、Surge、Egern）。当出现 Play 更新转圈、下载卡 0%、应用商店连不上、或需要为 dl.google.com / gvt1.com / xn--ngstr-lra8j.com / googlevideo.com 编写分流与 DNS 规则时使用。
+description: 编写与排查 Google Play 商店/下载分流规则（sing-box、mihomo、Xray、Surge、Egern）。当出现 Play 更新转圈、下载卡 0%、应用商店连不上、YouTube 视频黑屏/转圈、或需要为 dl.google.com / gvt1.com / xn--ngstr-lra8j.com / googlevideo.com 编写分流与 DNS 规则时使用。
 ---
 
 # Google Play 分流规则
@@ -13,9 +13,13 @@ description: 编写与排查 Google Play 商店/下载分流规则（sing-box、
 
 | 组 | 域名 | 走向 | 理由 |
 |---|---|---|---|
-| **下载 CDN** | `dl.google.com`、`dl-ssl.google.com`、`*.xn--ngstr-lra8j.com`、`*.gvt1.com`、`*.gvt2.com`、`*.gvt3.com`、`*.googlevideo.com` | **DIRECT** | 国内有 GGC 节点（联通 58.254.x / 114.250.x），60ms、4MB/s+ |
+| **下载 CDN** | `dl.google.com`、`dl-ssl.google.com`、`*.xn--ngstr-lra8j.com`、`*.gvt1.com`、`*.gvt2.com`、`*.gvt3.com` | **DIRECT** | 国内有 GGC 节点（联通 58.254.x / 114.250.x），60ms、4MB/s+ |
+| **视频流** | `*.googlevideo.com` | **PROXY** | 国内解析到境外 IP、无可用节点，直连必超时 |
 | **商店 API** | `play.googleapis.com`、`play-fe.googleapis.com`、`android.clients.google.com`、`*.googleapis.com` | **PROXY** | 无国内节点，必须出墙 |
 | **资源/图片** | `*.gstatic.com`、`*.ggpht.com`、`*.googleusercontent.com` | PROXY（gstatic 可直连） | 图标、封面、静态资源 |
+| **YouTube 页面** | `youtube.com`、`youtu.be`、`*.ytimg.com`、`youtubei.googleapis.com` | PROXY | 页面/封面/播放接口 |
+
+> ⚠️ **`googlevideo.com` 不属于下载 CDN。** 它和 `dl.google.com` 都挂着 Google 的 CDN 名头，但国内是否有节点完全不同：`dl.google.com` 解析到联通 GGC（`114.250.63.33`），直连 4MB/s；`googlevideo.com` 解析到境外 IP（`199.96.59.19`），直连秒断。**写进同一条 direct 规则会把 YouTube 视频打死。** 详见 [references/sing-box.md 第 4 节](references/sing-box.md#4-googlevideo-不能直连一个真实踩到的坑)。
 
 > `xn--ngstr-lra8j.com` 是 punycode，解码为 `ångströ.com`（Google 的 Angstrom CDN），**必须原样写 punycode**，写 `ångströ` 或 `angstrom` 都匹配不上。它和 `gvt1.com` 是同一套下载基础设施的两种域名形态，两个都要写。
 
@@ -30,10 +34,13 @@ description: 编写与排查 Google Play 商店/下载分流规则（sing-box、
 
 根因：这些域名在国内解析出的是**国内 GGC IP**。请求送到海外节点后，是"美国服务器去回连中国联通 CDN"，必然超时。所以不是节点坏了、不是协议问题，是**方向错了**。
 
-## 三个必踩的坑
+## 四个必踩的坑
 
 **坑 1：`domain_suffix: google.com → PROXY` 一把梭。**
 `dl.google.com` 也命中 `google.com` 后缀，于是下载被一起送走 → 转圈。必须把下载域名规则放在**代理规则之前**。
+
+**坑 1b：反过来，把 `googlevideo.com` 混进「下载 CDN → DIRECT」白名单。**
+这是坑 1 的镜像，更隐蔽：Play 下载照常飞快，**但 YouTube 视频全黑**。因为两者被当成同类 CDN 写进了一条规则，而 `googlevideo.com` 国内无节点、直连必超时。**Play 下载白名单里绝不能出现 `googlevideo.com`。**
 
 **坑 2：对下载域名做"远程 DNS 重解析"（sing-box 的 `resolve` / mihomo 的 `nameserver-policy` 指到海外 DoH）。**
 `googlevideo.com` 需要这么做（本地 DNS 被投毒），但 `dl.google.com` **绝对不能**——远程 DNS 会按出口所在地返回境外 IP，此时直连照样挂。
@@ -47,7 +54,7 @@ description: 编写与排查 Google Play 商店/下载分流规则（sing-box、
 |---|---|---|
 | 国内域名 | 国内 DNS（223.5.5.5 等） | 快 |
 | `dl.google.com` / `dl-ssl.google.com` | **国内 DNS**（明文或加密均可，但必须是国内视角/中国 ECS） | 只有国内视角才返回国内 GGC |
-| `googlevideo.com` / `gvt1-3` / `xn--ngstr` | **加密 DNS（经代理）** | 防投毒；实测经代理解析仍返回国内 GGC，可用 |
+| `googlevideo.com` / `gvt1-3` / `xn--ngstr` | **加密 DNS（经代理）** | 防投毒；`gvt*`/`ngstr` 经代理解析仍返回国内 GGC，可用 |
 | 其余境外域名 | 加密 DNS（经代理） | 防泄露 + 防投毒 |
 
 给终端设备（手机/电脑）省事的做法：把设备的 53 端口整体劫持进代理内核（sing-box `dns-in` + iptables REDIRECT 到 5335），由内核按上表分流解析，设备侧不再产生明文 DNS。
@@ -64,8 +71,8 @@ description: 编写与排查 Google Play 商店/下载分流规则（sing-box、
 
 ## 落地顺序（照做即可）
 
-1. 先加**下载域名 → DIRECT** 的规则，放在所有 `google.com` 代理规则之前。
-2. 再加**API 域名 → PROXY**。
+1. 先加**下载域名 → DIRECT** 的规则（`dl.google.com` / `dl-ssl` / `gvt*` / `xn--ngstr`，**不含 `googlevideo`**），放在所有 `google.com` 代理规则之前。
+2. 再加**API 域名 → PROXY**，以及 **YouTube 视频流 `googlevideo.com` → PROXY**。
 3. 处理 DNS：下载域名国内视角解析，`googlevideo`/`gvt*` 用加密 DNS。
 4. 重启内核，用 `scripts/verify-play-cdn.sh` 验证（见下）。
 5. 手机端**重连一次 Wi-Fi**（清 Android DNS 缓存），再试 Play。
