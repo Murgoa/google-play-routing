@@ -10,38 +10,44 @@
 #   1) dl.google.com 直接请求应返回 200/301，耗时 < 1s
 #   2) 经代理时，sing-box/mihomo 的 /connections 里 dl.google.com 的 chains 应为 direct
 #   3) 测速：直连通常 2~20MB/s；若掉到 1MB/s 量级，多半被送去代理了
-#   4) googlevideo.com 反之：直连应失败(000)，经代理应可达——它必须走代理
+#   4) googlevideo.com 是混合体：GGC 边缘应直连快(204/<1s)，redirector 应走代理
 
 set -u
 PROXY="${1:-}"
 CF_URL="https://speed.cloudflare.com/__down?bytes=10000000"
 DL_URL="https://dl.google.com/android/repository/platform-tools-latest-darwin.zip"
-CDN_HOST="rr4---sn-j5o76n7z.googlevideo.com"
+GGC_HOST="rr2---sn-j5o76n7s.googlevideo.com"      # 国内联通 GGC 边缘
+REDIR_HOST="redirector.googlevideo.com"           # 境外全局入口
 CURL=(curl -s -m 12 -o /dev/null)
 
 p() { printf '%-46s %s\n' "$1" "$2"; }
 hr() { printf '%s\n' "------------------------------------------------------------"; }
 
 echo "== 1. DNS 是否被投毒"
-for h in dl.google.com "$CDN_HOST"; do
+for h in dl.google.com "$GGC_HOST"; do
   ip=$(dig +short +time=3 +tries=1 "$h" 2>/dev/null | tail -1)
   [ -z "$ip" ] && ip="(解析失败)"
   p "$h" "$ip"
 done
 echo "   dl.google.com 期望国内 GGC(114.250.x / 58.254.x)"
-echo "   googlevideo 期望境外(199.96.x 等)；出现 108.160.x/31.13.x/199.59.x = 被投毒"
+echo "   GGC 边缘应解析到 58.254.x / 114.250.x；出现 108.160.x/31.13.x/199.59.x = 被投毒"
+echo "   注：加密 DNS 也可能被投毒（阿里 DoH 会返回不可用 IP），只有经代理的 DNS 才干净"
 hr
 
 echo "== 2. Play 下载域名直连（期望 200 且 MB/s 量级）"
 p "dl.google.com" "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "$DL_URL")"
 hr
 
-echo "== 2b. YouTube 视频流：直连应失败，代理应成功"
-p "googlevideo 直连" "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "https://$CDN_HOST/")"
+echo "== 2b. googlevideo 混合体：边缘应直连快，redirector 应走代理"
+p "GGC 边缘 直连"    "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "https://$GGC_HOST/")"
+p "redirector 直连"  "$("${CURL[@]}" -w '%{http_code} %{time_total}s' "https://$REDIR_HOST/")"
 if [ -n "$PROXY" ]; then
-  p "googlevideo 经代理" "$("${CURL[@]}" -x "http://$PROXY" -w '%{http_code} %{time_total}s' "https://$CDN_HOST/")"
+  p "GGC 边缘 经代理"   "$("${CURL[@]}" -x "http://$PROXY" -w '%{http_code} %{time_total}s' "https://$GGC_HOST/")"
+  p "redirector 经代理" "$("${CURL[@]}" -x "http://$PROXY" -w '%{http_code} %{time_total}s' "https://$REDIR_HOST/")"
 fi
-echo "   期望: 直连 000；代理 404/204。若直连成功而代理失败 = 分流反了"
+echo "   期望: 边缘直连 204 且 <1s，经代理会超时(境外够不到国内 GGC)"
+echo "         redirector 直连 000，经代理 204"
+echo "   若边缘经代理超时但仍被送去代理 = Play 下载会卡 0 字节"
 hr
 
 if [ -n "$PROXY" ]; then
@@ -71,4 +77,5 @@ echo
 echo "完成。判定要点："
 echo "  - dl.google.com 直连返回 200/301 且 < 1s = Play 下载 CDN 可达"
 echo "  - dl.google.com 经代理后明显变慢或 000 = 下载域名被送进代理（规则顺序问题）"
-echo "  - googlevideo 直连成功、代理失败 = 分流反了（视频流域名被错判成 DIRECT）"
+echo "  - GGC 边缘(58.254.x)直连快、经代理超时 = 正常"
+echo "  - 边缘被送去代理 = Play 下载会卡 0；边缘直连超时 = DNS 拿到假 IP"

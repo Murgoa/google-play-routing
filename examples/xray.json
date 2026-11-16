@@ -1,14 +1,23 @@
 {
-  "log": { "loglevel": "warning" },
+  "log": {
+    "loglevel": "warning"
+  },
   "inbounds": [
     {
       "tag": "socks-in",
       "port": 1080,
       "protocol": "socks",
-      "settings": { "udp": true, "auth": "noauth" },
+      "settings": {
+        "udp": true,
+        "auth": "noauth"
+      },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls", "quic"],
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
         "routeOnly": false
       }
     },
@@ -18,7 +27,10 @@
       "protocol": "http",
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"],
+        "destOverride": [
+          "http",
+          "tls"
+        ],
         "routeOnly": false
       }
     }
@@ -32,29 +44,57 @@
           {
             "address": "example.com",
             "port": 443,
-            "users": [{ "id": "REPLACE-UUID", "encryption": "none", "flow": "" }]
+            "users": [
+              {
+                "id": "REPLACE-UUID",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
           }
         ]
       },
       "streamSettings": {
         "network": "ws",
         "security": "tls",
-        "tlsSettings": { "serverName": "example.com" },
-        "wsSettings": { "path": "/" }
+        "tlsSettings": {
+          "serverName": "example.com"
+        },
+        "wsSettings": {
+          "path": "/"
+        }
       }
     },
-    { "tag": "direct", "protocol": "freedom" },
-    { "tag": "block", "protocol": "blackhole" },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    },
     {
       "tag": "dns-out",
       "protocol": "dns",
-      "settings": { "address": "1.1.1.1", "port": 53 },
-      "proxySettings": { "tag": "proxy" }
+      "settings": {
+        "address": "1.1.1.1",
+        "port": 53
+      },
+      "proxySettings": {
+        "tag": "proxy"
+      }
     }
   ],
   "dns": {
     "servers": [
-      { "address": "223.5.5.5", "domains": ["geosite:cn", "domain:dl.google.com"], "skipFallback": true },
+      {
+        "address": "223.5.5.5",
+        "domains": [
+          "geosite:cn",
+          "domain:dl.google.com"
+        ],
+        "skipFallback": true
+      },
       "https://1.1.1.1/dns-query"
     ],
     "queryStrategy": "UseIPv4"
@@ -64,20 +104,42 @@
     "rules": [
       {
         "type": "field",
-        "inboundTag": ["socks-in", "http-in"],
+        "inboundTag": [
+          "socks-in",
+          "http-in"
+        ],
         "port": 53,
         "outboundTag": "dns-out"
       },
       {
         "type": "field",
         "domain": [
+          "domain:dl-ssl.google.com"
+        ],
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "domain:redirector.googlevideo.com"
+        ],
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "domain:googlevideo.com"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "domain": [
           "domain:dl.google.com",
-          "domain:dl-ssl.google.com",
           "domain:xn--ngstr-lra8j.com",
           "domain:gvt1.com",
           "domain:gvt2.com",
-          "domain:gvt3.com",
-          "domain:googlevideo.com"
+          "domain:gvt3.com"
         ],
         "outboundTag": "direct"
       },
@@ -91,9 +153,27 @@
         ],
         "outboundTag": "proxy"
       },
-      { "type": "field", "domain": ["geosite:cn"], "outboundTag": "direct" },
-      { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" },
-      { "type": "field", "ip": ["geoip:cn"], "outboundTag": "direct" }
+      {
+        "type": "field",
+        "domain": [
+          "geosite:cn"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:cn"
+        ],
+        "outboundTag": "direct"
+      }
     ]
   }
 }

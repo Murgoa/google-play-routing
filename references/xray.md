@@ -11,7 +11,6 @@
         "type": "field",
         "domain": [
           "domain:dl.google.com",
-          "domain:dl-ssl.google.com",
           "domain:xn--ngstr-lra8j.com",
           "domain:gvt1.com",
           "domain:gvt2.com",
@@ -22,12 +21,17 @@
       {
         "type": "field",
         "domain": [
-          "domain:googlevideo.com",
+          "domain:redirector.googlevideo.com",
           "domain:youtube.com",
           "domain:youtu.be",
           "domain:ytimg.com"
         ],
         "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "domain": ["domain:googlevideo.com"],
+        "outboundTag": "direct"
       },
       {
         "type": "field",
@@ -58,7 +62,11 @@
 
 - Xray 的 `domain:` 前缀是**子域后缀匹配**（`domain:google.com` 会匹配 `dl.google.com`），`full:` 才是精确匹配。所以下载域名规则必须写在 `geosite:google` 之前。
 - `domainStrategy` 建议 `IPIfNonMatch`：域名规则未命中时才解析 IP 做 geoip 判断，减少无谓 DNS。
-- Xray 没有"按域名选 DNS 服务器"的能力，投毒问题要靠：
+- **`dl-ssl.google.com` 不要放进 direct**：它解析到境外 IP，实测直连 000/7s、代理 204/0.67s。
+- **`googlevideo.com` 不能一刀切**：`rrN---sn-*` 是国内 GGC（只能直连）、`redirector` 在境外（只能代理）。
+  上面用「先精确拦 `redirector` → 代理，再让其余 googlevideo → direct」拆开处理。
+  注意 Go 的 `domain:` 是后缀匹配，`domain:redirector.googlevideo.com` 只命中该主机本身，正好可以先拦。
+- Xray 没有 sing-box 那种"按域名选 DNS 服务器"的能力，投毒问题要靠下面三件套解决：
 
 ## 反投毒三件套
 
@@ -110,7 +118,8 @@
 {"dns": {"hosts": {"dl.google.com": "114.250.63.33"}}}
 ```
 
-反之，**`googlevideo.com` 绝不能写死国内 IP**——它国内本来就没有可用节点，写死就等于坐实直连失败。它需要的是走代理解析。
+反之，**`googlevideo.com` 不要写死 IP**——它的边缘节点在国内（`58.254.x`）、`redirector` 在境外，
+写死任何一个都会打死另一半。它需要的是**干净解析 + 按 IP/主机名分流**（见上文路由段）。
 
 缺点：CDN 节点会变、主机名会变，只适合临时救火。
 

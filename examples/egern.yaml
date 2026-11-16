@@ -52,9 +52,6 @@ rules:
       match: dl.google.com
     policy: DIRECT
   - domain_suffix:
-      match: dl-ssl.google.com
-    policy: DIRECT
-  - domain_suffix:
       match: xn--ngstr-lra8j.com
     policy: DIRECT
   - domain_suffix:
@@ -66,9 +63,15 @@ rules:
   - domain_suffix:
       match: gvt3.com
     policy: DIRECT
+  - domain:
+      match: redirector.googlevideo.com
+    policy: 节点
   - domain_suffix:
       match: googlevideo.com
     policy: DIRECT
+  - domain_suffix:
+      match: dl-ssl.google.com
+    policy: 节点
 
   # ---- 商店 API / 资源：走代理 ----
   - domain_suffix:

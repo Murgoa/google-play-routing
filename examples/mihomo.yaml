@@ -22,7 +22,6 @@ dns:
   nameserver-policy:
     "dl.google.com": "223.5.5.5"
     "+.dl.google.com": "223.5.5.5"
-    "+.dl-ssl.google.com": "223.5.5.5"
     # 防投毒：经代理的加密 DNS
     "+.googlevideo.com": ["https://1.1.1.1/dns-query"]
     "+.gvt1.com": ["https://1.1.1.1/dns-query"]
@@ -56,12 +55,14 @@ proxy-groups:
 rules:
   # ---- Play 下载 CDN：必须在 google.com 之前 ----
   - DOMAIN-SUFFIX,dl.google.com,DIRECT
-  - DOMAIN-SUFFIX,dl-ssl.google.com,DIRECT
   - DOMAIN-SUFFIX,xn--ngstr-lra8j.com,DIRECT
   - DOMAIN-SUFFIX,gvt1.com,DIRECT
   - DOMAIN-SUFFIX,gvt2.com,DIRECT
   - DOMAIN-SUFFIX,gvt3.com,DIRECT
+  # googlevideo 是混合体：境外入口走代理，国内 GGC 边缘走直连
+  - DOMAIN,redirector.googlevideo.com,PROXY
   - DOMAIN-SUFFIX,googlevideo.com,DIRECT
+  - DOMAIN-SUFFIX,dl-ssl.google.com,PROXY
 
   # ---- 商店 API / 资源：走代理 ----
   - DOMAIN-SUFFIX,play.googleapis.com,PROXY

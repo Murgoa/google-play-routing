@@ -1,24 +1,79 @@
 {
-  "log": { "level": "warn", "timestamp": true },
-
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
   "dns": {
     "servers": [
-      { "tag": "local", "type": "udp", "server": "223.5.5.5" },
-      { "tag": "remote", "type": "https", "server": "1.1.1.1", "detour": "proxy" }
+      {
+        "tag": "local",
+        "type": "https",
+        "server": "223.5.5.5",
+        "domain_resolver": "dns-bootstrap",
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "dns.alidns.com"
+        }
+      },
+      {
+        "tag": "dns-bootstrap",
+        "type": "udp",
+        "server": "223.5.5.5"
+      },
+      {
+        "tag": "remote",
+        "type": "https",
+        "server": "1.1.1.1",
+        "domain_resolver": "dns-bootstrap",
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "cloudflare-dns.com"
+        },
+        "detour": "proxy"
+      }
     ],
     "rules": [
-      { "domain": ["dl.google.com", "dl-ssl.google.com"], "server": "local" },
-      { "rule_set": ["geosite-cn"], "server": "local" }
+      {
+        "domain_suffix": [
+          "dl.google.com",
+          "xn--ngstr-lra8j.com",
+          "gvt1.com",
+          "gvt2.com",
+          "gvt3.com"
+        ],
+        "server": "local"
+      },
+      {
+        "rule_set": [
+          "geosite-cn"
+        ],
+        "server": "local"
+      }
     ],
     "final": "remote"
   },
-
   "inbounds": [
-    { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890 },
-    { "type": "redirect", "tag": "redirect-in", "listen": "0.0.0.0", "listen_port": 7892 },
-    { "type": "direct", "tag": "dns-in", "listen": "0.0.0.0", "listen_port": 5335 }
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 7890
+    },
+    {
+      "type": "redirect",
+      "tag": "redirect-in",
+      "listen": "0.0.0.0",
+      "listen_port": 7892
+    },
+    {
+      "type": "direct",
+      "tag": "dns-in",
+      "listen": "0.0.0.0",
+      "listen_port": 5335
+    }
   ],
-
   "outbounds": [
     {
       "type": "socks",
@@ -26,11 +81,13 @@
       "server": "127.0.0.1",
       "server_port": 1080
     },
-    { "type": "direct", "tag": "direct" }
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
   ],
-
   "route": {
-    "default_domain_resolver": "local",
+    "default_domain_resolver": "dns-bootstrap",
     "rule_set": [
       {
         "tag": "geosite-cn",
@@ -48,26 +105,27 @@
       }
     ],
     "rules": [
-      { "action": "sniff" },
-      { "protocol": "dns", "action": "hijack-dns" },
-      { "ip_is_private": true, "outbound": "direct" },
-
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      },
       {
         "domain_suffix": [
-          "googlevideo.com",
-          "xn--ngstr-lra8j.com",
-          "gvt1.com",
-          "gvt2.com",
-          "gvt3.com"
+          "googlevideo.com"
         ],
         "action": "resolve",
         "server": "remote"
       },
-
       {
         "domain_suffix": [
           "dl.google.com",
-          "dl-ssl.google.com",
           "xn--ngstr-lra8j.com",
           "gvt1.com",
           "gvt2.com",
@@ -75,25 +133,6 @@
         ],
         "outbound": "direct"
       },
-
-      {
-        "domain_suffix": ["googlevideo.com"],
-        "action": "resolve",
-        "server": "remote"
-      },
-
-      {
-        "domain_suffix": [
-          "googlevideo.com",
-          "youtube.com",
-          "youtu.be",
-          "ytimg.com",
-          "youtube-nocookie.com",
-          "youtubei.googleapis.com"
-        ],
-        "outbound": "proxy"
-      },
-
       {
         "domain_suffix": [
           "play.googleapis.com",
@@ -104,18 +143,29 @@
           "googleusercontent.com",
           "ggpht.com",
           "google.com",
-          "android.com"
+          "android.com",
+          "youtube.com",
+          "youtu.be",
+          "ytimg.com",
+          "youtubei.googleapis.com",
+          "dl-ssl.google.com"
         ],
         "outbound": "proxy"
       },
-
-      { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }
+      {
+        "rule_set": [
+          "geosite-cn",
+          "geoip-cn"
+        ],
+        "outbound": "direct"
+      }
     ],
     "final": "proxy",
     "auto_detect_interface": true
   },
-
   "experimental": {
-    "clash_api": { "external_controller": "127.0.0.1:9090" }
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090"
+    }
   }
 }

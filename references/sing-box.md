@@ -24,21 +24,17 @@ route.default_domain_resolver   1.12+ 必写，否则 FATAL
       {"protocol": "dns", "action": "hijack-dns"},
       {"ip_is_private": true, "outbound": "direct"},
 
-      {"domain_suffix": ["dl.google.com", "dl-ssl.google.com",
-                         "xn--ngstr-lra8j.com", "gvt1.com", "gvt2.com",
-                         "gvt3.com"],
+      {"domain_suffix": ["dl.google.com", "xn--ngstr-lra8j.com",
+                         "gvt1.com", "gvt2.com", "gvt3.com"],
        "outbound": "direct"},
 
       {"domain_suffix": ["googlevideo.com"],
        "action": "resolve", "server": "remote"},
 
-      {"domain_suffix": ["googlevideo.com", "youtube.com", "youtu.be",
-                         "ytimg.com", "youtube-nocookie.com"],
-       "outbound": "proxy"},
-
       {"domain_suffix": ["google.com", "googleapis.com", "gstatic.com",
                          "googleusercontent.com", "ggpht.com",
-                         "android.com"],
+                         "android.com", "youtube.com", "youtu.be",
+                         "ytimg.com"],
        "outbound": "proxy"},
 
       {"rule_set": ["cn", "cncidr"], "outbound": "direct"}
@@ -52,9 +48,10 @@ route.default_domain_resolver   1.12+ 必写，否则 FATAL
 
 - **`domain` vs `domain_suffix`**：`domain` 精确匹配，`domain_suffix` 含子域。`dl.google.com` 用 `domain_suffix` 写即可（它自身也匹配）。
 - **一条规则里的多个字段是 AND，同一字段里的多个值是 OR**。所以"域名 + rule_set"不能合并成一条。
-- **`action: "resolve"` 必须排在对应 `outbound` 规则之前**，它只重解析不改去向。
+- **`action: "resolve"` 必须排在按 IP 决策的规则之前**，它只换解析用的 DNS、不改去向。
 - `{"protocol": "dns", "action": "hijack-dns"}` 一条即可覆盖「指定 inbound 的 DNS」和「mixed 入站的 DNS」，不需要再写 `{"inbound": [...], "action": "hijack-dns"}`（两者重复）。
-- ⚠️ **`googlevideo.com` 不能和 `dl.google.com` 放在同一条 direct 规则里。** 两者走向相反（见 [第四节](#4-googlevideo-不能直连一个真实踩到的坑)），合写会直接把 YouTube 视频打死。
+- ⚠️ **`googlevideo.com` 既不要放进 direct 列表，也不要放进 proxy 列表。** 它下面混着国内 GGC 边缘和境外入口两类主机，只能「干净解析 + 按 IP 分流」（见 [第四节](#4-googlevideo-既不能一刀切直连也不能一刀切代理)）。
+- ⚠️ **`dl-ssl.google.com` 不要放进 direct 列表**：它解析到境外 IP，直连会挂，交给代理。
 
 ### 2. DNS
 
@@ -66,7 +63,8 @@ route.default_domain_resolver   1.12+ 必写，否则 FATAL
       {"tag": "remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"}
     ],
     "rules": [
-      {"domain": ["dl.google.com", "dl-ssl.google.com"], "server": "local"},
+      {"domain_suffix": ["dl.google.com", "xn--ngstr-lra8j.com",
+                         "gvt1.com", "gvt2.com", "gvt3.com"], "server": "local"},
       {"rule_set": ["cn"], "server": "local"}
     ],
     "final": "remote"
@@ -74,9 +72,14 @@ route.default_domain_resolver   1.12+ 必写，否则 FATAL
 }
 ```
 
-- `detour: remote` 表示这条 DNS 查询走代理，防投毒、防泄露。
-- **`dl.google.com` 必须 `local`**：远程 DNS 会按出口所在地返回境外 IP。
-- `googlevideo.com` 不写规则也会落到 `final: remote`，所以不需要单独列（除非你的 `cn` 规则集里误含了它）。
+- `detour: proxy` 表示这条 DNS 查询走代理。**它是唯一能拿到真实答案的解析器**。
+- **Play 下载域名必须 `local`**（国内视角）：
+  - `dl.google.com` 走远程 DNS 会按出口所在地返回境外 IP → 直连失效
+  - `xn--ngstr` / `gvt*` 用国内视角才能拿到联通 GGC
+- **`googlevideo.com` 落到 `final: remote`**，即由代理侧解析——这是**故意**的，因为它国内解析会被投毒。
+- ⚠️ **`local` 用加密 DNS（DoH）也一样会被投毒**：加密只保护「你→解析器」这一段，阿里 DNS 在墙内，
+  上游拿到的就是错的。实测 `rr2---sn-j5o76n7s.googlevideo.com` 阿里 DoH 返回 `64.13.192.74`（不通），
+  经代理的 DoH 返回 `58.254.137.131`（204/0.03s）。**加密不等于干净，「解析器在哪一边」才决定对错。**
 
 ### 3. 给终端设备接管 DNS（可选但推荐）
 
@@ -118,58 +121,80 @@ iptables -I FORWARD 1 -i br0 -m mac --mac-source $MAC -p udp --dport 443 \
 
 ---
 
-## 4. `googlevideo.com` 不能直连（一个真实踩到的坑）
+## 4. `googlevideo.com` 既不能一刀切直连，也不能一刀切代理
 
-> 这一节是踩坑后的复盘，结论与「下载 CDN 全部 DIRECT」的直觉相反，**请务必读完再抄配置**。
+> 这一节是两轮踩坑后的复盘。同一个域名后缀下面**混着两类完全不同的主机**，
+> 所以「全直连」和「全代理」都是错的，正确解法是**干净解析 + 按 IP 分流**。
 
-### 4.1 现象
+### 4.1 两种现象，同一个根
 
-YouTube 页面（`www.youtube.com`）能正常打开、列表能刷、封面能出，**但视频黑屏 / 一直转圈**。
+| 现象 | 表现 | 卡在哪 |
+|---|---|---|
+| A | YouTube 页面能开、视频黑屏转圈 | `redirector.googlevideo.com` 走了直连（境外 IP，连不上） |
+| B | Play 下载卡 0 字节、UI 一直转 | `rrN---sn-*.googlevideo.com` 走了代理（国内 GGC，境外连不上） |
 
-日志里的特征非常明确：
+两种反向的失败，根因是同一个：**googlevideo 下有两种主机，走向本来就不一样**。
+
+### 4.2 一个域名后缀，两类主机
+
+| 类型 | 例子 | 真实 IP 归属 | 只能怎么走 |
+|---|---|---|---|
+| **集群边缘（GGC）** | `rr2---sn-j5o76n7s.googlevideo.com`<br>`rr4---sn-j5o7dn7s.googlevideo.com` | **国内联通 GGC**（`58.254.137.x`） | **只能国内直连** |
+| **全局入口** | `redirector.googlevideo.com` | 境外（`199.96.59.19` 等） | **只能走代理** |
+
+关键点：`rrN---sn-XXXX` 是**集群专用主机名**，全球解析都指向同一个国内缓存——
+在美国服务器上用 `8.8.8.8` 解析，拿到的也是 `58.254.137.131`。
+
+所以「把 googlevideo 全部送去海外代理」这件事，从物理上就不可能成功：
+境外机器去连一个只服务中国联通 ISP 的 GGC，必然超时。
+
+### 4.3 实测数据
+
+在**路由器（国内）**上测：
+
+| 主机 | 阿里 DoH（加密）返回 | 干净 DoH（经代理）返回 | 直连真 IP | 走代理 |
+|---|---|---|---|---|
+| `rr2---sn-j5o76n7s` | `64.13.192.74`（假，Akamai 段）→ 000/5.8s | **`58.254.137.131`** | **204 / 0.03s** | 000 / 12s |
+| `rr4---sn-j5o7dn7s` | 假 IP | `58.254.137.197` | 204 | 000 / 12s |
+| `redirector` | `199.96.59.19`（境外） | 同 | **000 / 0.01s** | **204 / 0.9s** |
+
+在**出口服务器（美国 dedirock）**上测同一个域名：
 
 ```
-ERROR ... open connection to [142.250.125.94]:443 using outbound/direct[direct]:
-          dial tcp 142.250.125.94:443: i/o timeout
-ERROR ... connection download closed: remote error: rejected
+rr2---sn-j5o76n7s.googlevideo.com → 58.254.137.131   ← 解析是对的
+从这台美国机器直连它              → 000 / 10s 超时   ← 但连不上
 ```
 
-`clash_api` 里这条连接的 `chains` 是 `["direct"]`。
+这三组数据说明：
 
-### 4.2 根因
+- 直连时 DNS 会被投毒 → 拿到假 IP → 失败
+- 走代理时 IP 是对的，但**境外到不了国内 GGC** → 也失败
 
-配置里有一条本该只写 Play 下载域名的 `direct` 规则，`domain_suffix` 里混进了 `googlevideo.com`（以及 `xn--ngstr-lra8j.com`、`gvt1/2/3`）：
+### 4.4 加密 DNS ≠ 干净 DNS
 
-```json
-// ❌ 错误：把视频流域名塞进了 Play 下载的直连白名单
-{
-  "domain_suffix": ["dl.google.com", "dl-ssl.google.com",
-                    "xn--ngstr-lra8j.com", "gvt1.com", "gvt2.com",
-                    "gvt3.com", "googlevideo.com"],
-  "outbound": "direct"
-}
+「用加密 DNS 不就不会被投毒了？」——不行，这是最容易误判的一点。
+
+**加密只保护「客户端 → 解析器」这一段**。解析器本身在墙内，它向上游查询时拿到的就已经是错数据，
+加密传输一个错误答案，结果还是错的。
+
+实测同一个域名，两种加密 DNS：
+
+| 加密 DNS | 返回 | 实测 |
+|---|---|---|
+| 阿里 DoH（`https://223.5.5.5/dns-query`） | `64.13.192.74` | **000 / 5.8s** ❌ |
+| 经代理的 DoH（`remote`） | `58.254.137.131` | **204 / 0.03s** ✅ |
+
+反过来，`dl.google.com` 这类域名**必须**用国内视角的加密 DNS，才能拿到国内 GGC：
+
+```
+阿里 DoH → dl.google.com = 58.254.149.161   （真·联通 GGC）✅
 ```
 
-因为 `route.rules` **先匹配先得**，`googlevideo.com` 在这条规则就被判了 `direct`，后面所有代理规则（含 `google.com → proxy`）再也轮不到它。而国内直连 Google 视频 CDN 必然超时。
+**结论：加密不决定对错，「解析器站在哪一边」才决定。** 两类域名方向相反，要分别用两套 DNS。
 
-**play 下载域名和 googlevideo 只是"看起来同类"（都是 Google 的 CDN），实际归属完全相反。**
+### 4.5 正确写法：干净解析 + 按 IP 分流
 
-### 4.3 为什么两者必须分开（实测判定）
-
-| 域名 | 国内 DNS（223.5.5.5）解析 | 国内有无可用节点 | 直连实测 | 走代理实测 | 结论 |
-|---|---|---|---|---|---|
-| `dl.google.com` | `114.250.63.33`（联通 GGC） | **有** | **200 / 4.09 MB/s** | 200 / 1.14 MB/s | **DIRECT** |
-| `rr4---sn-xxx.xn--ngstr-lra8j.com` | 国内 GGC | 有 | 204 / 0.18s | — | **DIRECT** |
-| `redirector.googlevideo.com` | `199.96.59.19`（境外） | **无** | **000 / 0.01s 连接重置** | **204 / 0.76s** | **PROXY** |
-
-判据非常干脆：**看国内 DNS 解析出来的 IP 在不在国内**。
-
-- 解析到 `114.250.x` / `58.254.x`（联通 GGC）→ 直连快，代理反而慢（多绕一跳）
-- 解析到境外 IP → 直连必挂，只能走代理
-
-所以「Play 下载直连」这条规则**只对 `dl.google.com` / `gvt*` / `xn--ngstr` 成立**，`googlevideo.com` 必须走代理。
-
-### 4.4 正确写法
+既然走向取决于**解析出来的 IP 在不在国内**，就让 `cncidr` 规则去判：
 
 ```json
 "rules": [
@@ -177,51 +202,55 @@ ERROR ... connection download closed: remote error: rejected
   {"protocol": "dns", "action": "hijack-dns"},
   {"ip_is_private": true, "outbound": "direct"},
 
-  // ① Play 下载 CDN —— 国内有 GGC，直连
-  {"domain_suffix": ["dl.google.com", "dl-ssl.google.com",
-                     "xn--ngstr-lra8j.com", "gvt1.com", "gvt2.com", "gvt3.com"],
+  // ① googlevideo：先用干净 DNS 拿真实 IP（不决定去向）
+  {"domain_suffix": ["googlevideo.com"], "action": "resolve", "server": "remote"},
+
+  // ② Play 下载 CDN —— 国内有 GGC，直连
+  {"domain_suffix": ["dl.google.com", "xn--ngstr-lra8j.com",
+                     "gvt1.com", "gvt2.com", "gvt3.com"],
    "outbound": "direct"},
 
-  // ② YouTube 视频流 —— 必须代理（先 resolve 防投毒，再改去向）
-  {"domain_suffix": ["googlevideo.com"], "action": "resolve", "server": "remote"},
-  {"domain_suffix": ["googlevideo.com", "youtube.com", "youtu.be",
-                     "ytimg.com", "youtube-nocookie.com"],
-   "outbound": "proxy"},
-
-  // ③ Google 其余
+  // ③ Google 其余（注意：不要包含 googlevideo.com）
   {"domain_suffix": ["google.com", "googleapis.com", "gstatic.com",
-                     "googleusercontent.com", "ggpht.com", "android.com"],
+                     "googleusercontent.com", "ggpht.com", "android.com",
+                     "youtube.com", "youtu.be", "ytimg.com"],
    "outbound": "proxy"},
 
+  // ④ 按 IP 落地：国内 GGC → 直连；其余 → final(proxy)
   {"rule_set": ["cn", "cncidr"], "outbound": "direct"}
-]
+],
+"final": "proxy"
 ```
 
-顺序上要保证：**Play 下载直连规则 排在 YouTube/Google 代理规则之前**，且 `googlevideo` 的 `resolve` 排在它的 `outbound` 之前。
+三条要点：
 
-### 4.5 验证
+1. **`resolve` 只改「用哪个 DNS 解析」，不改去向**，必须排在按 IP 决策的规则之前。
+2. **`googlevideo.com` 不能出现在 ③ 的代理域名列表里**，否则它在 ③ 就被判走代理，轮不到 ④。
+3. `dl-ssl.google.com` **不要**放进 ② 的直连列表——它解析到境外 IP，直连会挂
+   （实测路由器直连 000/7s，走代理 204/0.67s）。
+
+### 4.6 验证
 
 ```bash
-# 视频流入口：直连会 000/秒断，代理应 204
-curl -s -m 8 -o /dev/null -w 'proxy=%{http_code} t=%{time_total}\n' \
+# 边缘节点：应为 204 且很快（走直连）
+curl -s -m 8 -o /dev/null -w 'ggc=%{http_code} t=%{time_total}\n' \
+  -x http://127.0.0.1:7890 https://rr2---sn-j5o76n7s.googlevideo.com/generate_204
+
+# 全局入口：应为 204（走代理，慢一些是正常的）
+curl -s -m 8 -o /dev/null -w 'redirector=%{http_code} t=%{time_total}\n' \
   -x http://127.0.0.1:7890 https://redirector.googlevideo.com/generate_204
-curl -s -m 6 -o /dev/null -w 'direct=%{http_code} t=%{time_total}\n' \
-  https://redirector.googlevideo.com/generate_204
 
-# 确认 googlevideo 真正走了代理：chains 不应是 ["direct"]
-curl -s http://127.0.0.1:9090/connections | sed 's/},{/}\n{/g' \
-  | grep -i googlevideo | grep -o '"chains":\[[^]]*\]'
-
-# 同时确认 Play 下载没被误伤：仍应 MB/s 量级
-curl -s -m 8 -o /dev/null -w 'dl=%{http_code} speed=%{speed_download}\n' \
-  https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
+# 看实际出口链：边缘应为 ["direct"]，redirector 应出现节点名
+curl -s http://127.0.0.1:9090/connections | tr '}' '\n' \
+  | grep -i googlevideo | grep -oE '"host":"[^"]*"|"chains":\[[^]]*\]'
 ```
 
-判据：`googlevideo` 的 `chains` 出现节点名 = 正常；`dl.google.com` 测速仍在 MB/s 级 = 没误伤 Play。
+**排查铁律**：只要「经代理仍然超时」，就 SSH 到**出口服务器**上跑一句
+`curl https://<域名>/generate_204`，看它把域名解析成了什么 IP。
+这次就是在出口机上发现它解析到国内联通 IP，才定位到本质原因。
 
-### 4.6 一句话记忆
+### 4.7 一句话记忆
 
-> **`dl.google.com` / `gvt*` / `xn--ngstr` → 直连（国内 GGC）**
-> **`googlevideo.com` → 代理（国内无节点）**
-> 两者都是 Google CDN，但方向相反，**绝不能写进同一条规则**。
-
+> **googlevideo 是混合体：`rrN---sn-*` 是国内 GGC（只能直连），`redirector` 在境外（只能代理）。**
+> 所以不要按域名决定，要**先用干净 DNS 解析，再按 IP 在不在国内决定**。
+> 加密 DNS 不等于干净 DNS——解析器的位置才是关键。

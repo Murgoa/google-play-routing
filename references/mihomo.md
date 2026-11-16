@@ -6,14 +6,15 @@
 rules:
   # ---- 下载 CDN：必须直连，且必须排在 google.com 之前 ----
   - DOMAIN-SUFFIX,dl.google.com,DIRECT
-  - DOMAIN-SUFFIX,dl-ssl.google.com,DIRECT
   - DOMAIN-SUFFIX,xn--ngstr-lra8j.com,DIRECT
   - DOMAIN-SUFFIX,gvt1.com,DIRECT
   - DOMAIN-SUFFIX,gvt2.com,DIRECT
   - DOMAIN-SUFFIX,gvt3.com,DIRECT
 
-  # ---- YouTube 视频流：必须走代理（国内无 GGC 节点，直连必超时）----
-  - DOMAIN-SUFFIX,googlevideo.com,PROXY
+  # ---- googlevideo 是混合体：只有全局入口在境外，边缘节点都在国内 ----
+  #   先精确拦掉境外入口，其余交给直连（fake-ip 模式下也能正确工作）
+  - DOMAIN,redirector.googlevideo.com,PROXY
+  - DOMAIN-SUFFIX,googlevideo.com,DIRECT
   - DOMAIN-SUFFIX,youtube.com,PROXY
   - DOMAIN-SUFFIX,youtu.be,PROXY
   - DOMAIN-SUFFIX,ytimg.com,PROXY
@@ -36,6 +37,9 @@ rules:
 
 - `DOMAIN-SUFFIX,xn--ngstr-lra8j.com` 直接写 punycode 原文即可，mihomo 会自动匹配子域；**不要**写成 `*.xn--ngstr-lra8j.com`。
 - 规则是**自上而下首个命中**，所以下载规则必须在 `GEOSITE,google` / `DOMAIN-SUFFIX,google.com` 之前。
+- **`dl-ssl.google.com` 不要写 DIRECT**：它解析到境外 IP，实测直连 000/7s，走代理 204/0.67s。
+- **`googlevideo.com` 不要写死**：它下面混着国内 GGC 边缘和境外入口两类主机，全直连/全代理都会翻车。
+  交给 `GEOIP,CN,DIRECT` 按 IP 落地，并在 `nameserver-policy` 里给它配**经代理的** DoH（否则国内 DNS 返回假 IP）。
 - 如果用 `GEOSITE,category-google` 之类的大集合，务必确认它不会把 `dl.google.com` 一起吞掉（多数 geo 集合里 `google` 类目确实包含 `dl.google.com`）。
 
 ## DNS 段
@@ -53,18 +57,21 @@ dns:
     # 下载域名：国内视角解析，拿到国内 GGC
     "dl.google.com": "223.5.5.5"
     "+.dl.google.com": "223.5.5.5"
-    # 防投毒：走加密 DNS（需要代理支持 DoH）
+    # gvt/ngstr 和 dl.google.com 一样，必须国内视角，才能拿到联通 GGC
+    "+.gvt1.com": "223.5.5.5"
+    "+.gvt2.com": "223.5.5.5"
+    "+.gvt3.com": "223.5.5.5"
+    "+.xn--ngstr-lra8j.com": "223.5.5.5"
+    # googlevideo 必须走「经代理的」加密 DNS：国内 DNS（哪怕加密）返回的是假 IP
     "+.googlevideo.com": ["https://1.1.1.1/dns-query"]
-    "+.gvt1.com": ["https://1.1.1.1/dns-query"]
-    "+.gvt2.com": ["https://1.1.1.1/dns-query"]
-    "+.gvt3.com": ["https://1.1.1.1/dns-query"]
-    "+.xn--ngstr-lra8j.com": ["https://1.1.1.1/dns-query"]
 ```
 
 要点：
 
 - `+.` 前缀 = 后缀匹配（含自身），写在 `nameserver-policy` 的 key 上。
-- **`dl.google.com` 不要指向海外 DoH**：会返回境外 IP，直连失效、下载掉到 1MB/s。
+- **`dl.google.com` / `gvt*` / `xn--ngstr` 不要指向海外 DoH**：会返回境外 IP，直连失效、下载掉到 1MB/s。
+- **`googlevideo` 必须指向海外 DoH**：国内 DNS 对它是投毒的（阿里 DoH 也一样，返回 `64.13.192.74` 这种不可用 IP）。
+  加密 ≠ 干净，只有墙外的解析器才干净。
 - `fake-ip` 模式下规则匹配用的是域名，不会受"解析出的假 IP"影响；`redir-host` 模式下要特别注意投毒问题。
 
 ## 若 DNS 配置不生效

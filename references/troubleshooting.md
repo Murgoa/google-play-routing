@@ -10,7 +10,8 @@ Play 更新失败通常有四种形态，指向完全不同的原因：
 | B. Play 首页也打不开 | API 都不通 | 规则/节点问题 |
 | C. 下载到某个百分比停住 | 部分 CDN 域名没覆盖 | 漏了 `xn--ngstr` |
 | D. 只有 4G/蜂窝网络异常 | 分流只在 Wi-Fi 环境生效 | 客户端未在蜂窝下启用代理 |
-| E. **YouTube 页面能开、视频黑屏转圈** | 站点通、视频流不通 | **`googlevideo.com` 被错判成 DIRECT** |
+| E. **YouTube 页面能开、视频黑屏转圈** | 站点通、视频流不通 | `redirector.googlevideo.com` 走了 DIRECT（它在境外） |
+| F. **Play 下载卡 0 字节、连接挂在 `googlevideo`** | 页面/API 都正常，就是不下载 | `rrN---sn-*` 被送去代理，**境外出口连不到国内 GGC** |
 
 ## 二、实测数据（2026-11，中国大陆移动宽带）
 
@@ -36,6 +37,35 @@ Play 更新失败通常有四种形态，指向完全不同的原因：
 
 **结论：`googlevideo.com` 必须加密解析；`dl.google.com` 必须国内解析。两者方向相反，不能一刀切。**
 
+### 加密 DNS 也会被污染（关键）
+
+「换成加密 DNS 就不怕投毒了」是错的——加密只保护「客户端 → 解析器」这一段，
+解析器在墙内，上游拿到的就是错数据。
+
+同一个域名 `rr2---sn-j5o76n7s.googlevideo.com`：
+
+| 解析方式 | 返回 | 直连该 IP |
+|---|---|---|
+| 阿里 DoH `https://223.5.5.5/dns-query`（加密，墙内） | `64.13.192.74`（Akamai 段，**假**） | **000 / 5.8s** ❌ |
+| 经代理的 DoH（墙外） | `58.254.137.131`（联通 GGC，**真**） | **204 / 0.03s** ✅ |
+
+反过来 `dl.google.com` 必须用墙内视角：阿里 DoH → `58.254.149.161`（真 GGC）。
+
+**结论：加密不决定对错，「解析器站在哪一边」才决定。**
+
+### 境外出口连不到国内 GGC（用出口机验证）
+
+`rrN---sn-XXXX.googlevideo.com` 是**集群专用主机名**，全球解析都指向同一个国内缓存。
+在美国出口机上实测：
+
+```
+rr2---sn-j5o76n7s.googlevideo.com → 58.254.137.131    ← 解析正确
+从美国机器直连它                  → 000 / 10s 超时    ← 但物理上够不到
+```
+
+所以「把 googlevideo 全部送去代理」永远修不好——**必须国内直连**。
+但国内直连又会被投毒，于是唯一正解是：干净解析拿真 IP + 按 IP 分流。
+
 ### 节点不影响结论
 
 同一时刻从三个地区（美/澳/新）的节点访问 Play 下载 CDN 全部超时——说明问题与节点质量无关，是"海外回连国内 CDN"这一结构性错误。
@@ -57,7 +87,16 @@ Play 更新失败通常有四种形态，指向完全不同的原因：
 curl -s http://127.0.0.1:9090/connections | python3 -m json.tool | \
   grep -E '"host"|"chains"|"download"' | head -30
 ```
-判据：Play 下载类域名（`dl.google.com` / `gvt1` / `ngstr`）的 `chains` 应为 `["direct"]`；**`googlevideo.com` 相反，`chains` 应出现节点名**，为 `["direct"]` 则说明视频流被错判了。
+判据：Play 下载类域名（`dl.google.com` / `gvt1` / `ngstr`）的 `chains` 应为 `["direct"]`。
+
+**`googlevideo.com` 没有统一的判据**——它是混合体，看主机名：
+
+| 主机 | 期望 chains |
+|---|---|
+| `rrN---sn-XXXX.googlevideo.com`（国内 GGC 边缘） | `["direct"]`，且应 < 1s |
+| `redirector.googlevideo.com`（境外入口） | 应出现节点名 |
+
+关键看**延迟**而不是链名：边缘若 10s+ 或 `download` 恒为 0，就是 IP 不对或方向错了。
 
 ```bash
 # 2. 手工对比直连与代理
@@ -82,7 +121,17 @@ curl -s -x http://127.0.0.1:7890 -m 10 -o /dev/null \
 ```
 判据：返回 200/301 且 < 1s = 域名规则生效；000 超时 = 还在按 IP 决策。
 
-## 四、七个真实踩过的坑
+```bash
+# 5. ★ 最后一次「经代理仍超时」时，去出口服务器上看它解析成了什么 IP
+ssh root@<出口机>
+getent ahostsv4 rr2---sn-j5o76n7s.googlevideo.com | head -1
+curl -s -m 10 -o /dev/null -w '%{http_code} %{time_total}\n' \
+  https://rr2---sn-j5o76n7s.googlevideo.com/generate_204
+```
+判据：如果解析结果是**国内 IP**（`58.254.x` / `114.250.x`），那这条路径注定失败——
+境外机器永远够不到国内 GGC，必须改成国内直连。
+
+## 四、八个真实踩过的坑
 
 1. **`domain_suffix: google.com → PROXY` 吞掉了 `dl.google.com`。**
    加上"Google 全量走代理"后 Play 立刻 0 字节。正解：下载域名规则放最前。
@@ -91,14 +140,20 @@ curl -s -x http://127.0.0.1:7890 -m 10 -o /dev/null \
    Play 下载一切正常，**但 YouTube 视频全黑、一直转圈**。日志满是
    `dial tcp ...: i/o timeout using outbound/direct`，`chains` 显示 `["direct"]`。
    根因是把它和 `dl.google.com` 当成同类 CDN 写进了一条规则。
-   正解：`googlevideo.com` 单独一条 → PROXY（前面加 `resolve`）。
-   详见 [sing-box.md 第 4 节](sing-box.md#4-googlevideo-不能直连一个真实踩到的坑)。
+
+1c. **改全代理后，Play 下载又卡 0 字节 —— 于是以为 1b 的结论错了。**
+   其实两边都没错：`googlevideo.com` 是**混合体**，
+   `rrN---sn-*`（国内 GGC）只能直连，`redirector`（境外）只能代理。
+   全直连和全代理都会翻车，唯一正解是 **`resolve` 拿干净 IP + `cncidr` 按 IP 分流**。
+   详见 [sing-box.md 第 4 节](sing-box.md#4-googlevideo-既不能一刀切直连也不能一刀切代理)。
 
 2. **对 `dl.google.com` 做远程 DNS 重解析（sing-box `resolve`）。**
    远程 DNS 按出口所在地返回境外 IP → 直连失效 → 速度从 4.3MB/s 掉到 0.97MB/s。
 
 3. **撤掉所有 `resolve` 后 `googlevideo.com` 又挂。**
-   因为它被 `default_domain_resolver`（本地 DNS）解析，拿到投毒 IP。正解：`resolve` 只对 `googlevideo` / `gvt*` 生效，`dl.google.com` 排除。
+   因为它被 `default_domain_resolver`（本地 DNS）解析，拿到投毒 IP。
+   正解：对 `googlevideo.com` 保留 `resolve`（server 指到经代理的干净 DNS），`dl.google.com` 排除在外。
+   注意 `resolve` 只负责「用哪个 DNS 解析」，最终走直连还是代理，仍由后面的 `cncidr` 规则按 IP 决定。
 
 4. **只改 TCP 规则，QUIC 用 `DROP`。**
    客户端要等 20s 超时才回落 TCP，表现为"打开很慢"。正解：`filter FORWARD ... -j REJECT --reject-with icmp-port-unreachable`（`raw`/`mangle` 表不支持 REJECT）。

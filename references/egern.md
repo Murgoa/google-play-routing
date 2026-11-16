@@ -11,19 +11,25 @@ rules:
       match: dl.google.com
     policy: DIRECT
   - domain_suffix:
-      match: dl-ssl.google.com
+      match: xn--ngstr-lra8j.com
     policy: DIRECT
   - domain_suffix:
-      match: xn--ngstr-lra8j.com
+      match: gvt1.com
+    policy: DIRECT
+  - domain_suffix:
+      match: gvt2.com
     policy: DIRECT
   - domain_suffix:
       match: gvt3.com
     policy: DIRECT
 
-  # ---- YouTube 视频流：必须走代理 ----
+  # ---- googlevideo 是混合体：先精确拦境外入口，其余边缘节点在国内走直连 ----
+  - domain:
+      match: redirector.googlevideo.com
+    policy: 节点
   - domain_suffix:
       match: googlevideo.com
-    policy: 节点
+    policy: DIRECT
   - domain_suffix:
       match: youtube.com
     policy: 节点
